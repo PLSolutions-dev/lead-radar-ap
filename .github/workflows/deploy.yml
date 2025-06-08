@@ -17,15 +17,19 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Set up Node.js environment
+      # 2. Set up Node.js and configure caching
+      # This is updated to use the package-lock.json for reliable caching
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18' # Use a version compatible with your Firebase Functions
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: functions/package-lock.json
 
-      # 3. Install dependencies for your functions
+      # 3. Install dependencies using a clean install method
+      # 'npm ci' is faster and more reliable for automated environments
       - name: Install Function Dependencies
-        run: cd functions && npm install
+        run: cd functions && npm ci
       
       # 4. Deploy all code (Hosting and Functions) to Firebase
       - name: Deploy to Firebase
