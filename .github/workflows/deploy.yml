@@ -1,8 +1,5 @@
-# .github/workflows/deploy.yml
-
 name: Deploy to Firebase
 
-# This workflow runs automatically every time you push to the 'main' branch
 on:
   push:
     branches:
@@ -10,15 +7,14 @@ on:
 
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-latest # Use a standard Linux virtual machine
+    runs-on: ubuntu-latest
 
     steps:
-      # 1. Get your code from the repository
+      # 1. Checkout your codebase
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Set up Node.js and configure caching
-      # This is updated to use the package-lock.json for reliable caching
+      # 2. Set up Node.js and cache dependencies
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
@@ -26,24 +22,30 @@ jobs:
           cache: 'npm'
           cache-dependency-path: functions/package-lock.json
 
-      # 3. Install dependencies using a clean install method
-      # 'npm ci' is faster and more reliable for automated environments
+      # 3. Install Firebase Function dependencies
       - name: Install Function Dependencies
         run: cd functions && npm ci
-      
-      # 4. Deploy all code (Hosting and Functions) to Firebase
-      - name: Deploy to Firebase
-        run: |
-          npm install -g firebase-tools
-          firebase deploy --token "${{ secrets.FIREBASE_TOKEN }}" --project leadradar-99bac --non-interactive
 
-      # 5. Authenticate to Google Cloud using the Service Account Key
+      # 4. Skip lint (avoids error if not configured)
+      - name: Skip Lint
+        run: echo "Skipping lint step"
+
+      # 5. Install Firebase CLI globally
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      # 6. Authenticate using Service Account Key (stored in GitHub Secrets)
       - name: Authenticate to Google Cloud
-        uses: 'google-github-actions/auth@v2'
+        uses: google-github-actions/auth@v2
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
-      # 6. Set public permissions on the 'placesTextSearch' function
+      # 7. Deploy Hosting and Functions (no token needed)
+      - name: Deploy to Firebase
+        run: |
+          firebase deploy --project leadradar-99bac --non-interactive
+
+      # 8. Make 'placesTextSearch' publicly invokable
       - name: Set Permissions for placesTextSearch
         run: >
           gcloud functions add-iam-policy-binding placesTextSearch
@@ -52,7 +54,7 @@ jobs:
           --member="allUsers"
           --role="roles/cloudfunctions.invoker"
 
-      # 7. Set public permissions on the 'pageSpeedProxy' function
+      # 9. Make 'pageSpeedProxy' publicly invokable
       - name: Set Permissions for pageSpeedProxy
         run: >
           gcloud functions add-iam-policy-binding pageSpeedProxy
