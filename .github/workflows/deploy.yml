@@ -1,0 +1,58 @@
+# .github/workflows/deploy.yml
+
+name: Deploy to Firebase
+
+# This workflow runs automatically every time you push to the 'main' branch
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest # Use a standard Linux virtual machine
+
+    steps:
+      # 1. Get your code from the repository
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. Set up Node.js environment
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18' # Use a version compatible with your Firebase Functions
+
+      # 3. Install dependencies for your functions
+      - name: Install Function Dependencies
+        run: cd functions && npm install
+      
+      # 4. Deploy all code (Hosting and Functions) to Firebase
+      - name: Deploy to Firebase
+        run: |
+          npm install -g firebase-tools
+          firebase deploy --token "${{ secrets.FIREBASE_TOKEN }}" --project leadradar-99bac --non-interactive
+
+      # 5. Authenticate to Google Cloud using the Service Account Key
+      - name: Authenticate to Google Cloud
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      # 6. Set public permissions on the 'placesTextSearch' function
+      - name: Set Permissions for placesTextSearch
+        run: >
+          gcloud functions add-iam-policy-binding placesTextSearch
+          --project=leadradar-99bac
+          --region=us-central1
+          --member="allUsers"
+          --role="roles/cloudfunctions.invoker"
+
+      # 7. Set public permissions on the 'pageSpeedProxy' function
+      - name: Set Permissions for pageSpeedProxy
+        run: >
+          gcloud functions add-iam-policy-binding pageSpeedProxy
+          --project=leadradar-99bac
+          --region=us-central1
+          --member="allUsers"
+          --role="roles/cloudfunctions.invoker"

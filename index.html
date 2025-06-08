@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LeadRadar - Business Insight Tool</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+    <script async src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initMapPlaceholder"></script>
+    <style>
+        :root {
+            --color-primary-dark: #111827;
+            --color-secondary-dark: #1f2937;
+            --color-accent: #20c997;
+            --color-text-light: #f3f4f6;
+            --color-text-dim: #9ca3af;
+            --color-card-bg: #374151;
+        }
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: var(--color-primary-dark);
+            color: var(--color-text-light);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        #app-section { display: none; width: 100%; height: 100vh; }
+        body.authenticated #app-section { display: flex; }
+        body.authenticated #auth-section { display: none; }
+        #sidebar { position: fixed; top: 0; left: 0; width: 256px; height: 100vh; transform: translateX(-100%); transition: transform 0.3s ease-in-out; z-index: 50; box-shadow: 2px 0 10px rgba(0,0,0,0.5); }
+        #sidebar.open { transform: translateX(0); }
+        #sidebar-overlay { position: fixed; inset: 0; background-color: rgba(0, 0, 0, 0.6); z-index: 40; opacity: 0; visibility: hidden; transition: opacity 0.3s ease-in-out, visibility 0.3s ease-in-out; }
+        #sidebar-overlay.visible { opacity: 1; visibility: visible; }
+        @media (min-width: 768px) { #sidebar { position: sticky; transform: translateX(0); box-shadow: none; flex-shrink: 0; } #sidebar-overlay { display: none; } #main-content { width: calc(100% - 256px); } }
+        .sidebar-item.active::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background-color: var(--color-accent); border-radius: 0 4px 4px 0; box-shadow: 0 0 10px var(--color-accent); }
+        .sidebar-item.active .material-icons-outlined, .sidebar-item.active span { color: var(--color-accent); }
+        .map-container { width: 100%; height: 200px; margin-top: 1rem; border-radius: 0.5rem; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); }
+        #reports-map-container { min-height: 300px; }
+        .score-good { color: #34d399; }
+        .score-medium { color: #facc15; }
+        .score-bad { color: #ef4444; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+
+    <div id="auth-section" class="w-full h-screen flex items-center justify-center p-4">
+        <div class="p-8 max-w-sm mx-auto bg-gray-800 rounded-lg shadow-xl space-y-4 border border-gray-700">
+             <div class="flex items-center justify-center mb-6">
+                <span class="material-icons-outlined text-teal-400 text-4xl mr-3">radar</span>
+                <h1 class="text-3xl font-bold text-teal-400">LeadRadar</h1>
+            </div>
+            <input id="email" type="email" placeholder="Email" class="w-full p-3 rounded bg-gray-900 text-white border border-gray-700 focus:ring-2 focus:ring-teal-500 focus:outline-none" />
+            <input id="password" type="password" placeholder="Password" class="w-full p-3 rounded bg-gray-900 text-white border border-gray-700 focus:ring-2 focus:ring-teal-500 focus:outline-none" />
+            <button onclick="login()" class="w-full bg-blue-600 py-3 rounded font-semibold hover:bg-blue-700 transition-colors">Login</button>
+            <button onclick="signup()" class="w-full bg-green-600 py-3 rounded font-semibold hover:bg-green-700 transition-colors">Sign Up</button>
+            <p id="auth-error" class="text-red-400 text-center text-sm pt-2 min-h-[20px]"></p>
+        </div>
+    </div>
+
+    <div id="app-section">
+        <div id="sidebar-overlay" onclick="toggleSidebar()"></div>
+        <aside id="sidebar" class="bg-gray-900 border-r border-gray-800 p-6 flex flex-col shadow-lg">
+            <div class="flex items-center mb-10">
+                <span class="material-icons-outlined text-teal-400 text-3xl mr-3">radar</span>
+                <h2 class="text-2xl font-bold text-teal-400">LeadRadar</h2>
+            </div>
+            <nav class="flex-grow">
+                <ul>
+                    <li class="mb-2"><a href="#" id="nav-search-leads" class="sidebar-item flex items-center p-3 rounded-lg"><span class="material-icons-outlined mr-4">search</span><span>Search GMB Leads</span></a></li>
+                    <li class="mb-2"><a href="#" id="nav-manage-leads" class="sidebar-item flex items-center p-3 rounded-lg"><span class="material-icons-outlined mr-4">folder_shared</span><span>Manage Leads</span></a></li>
+                    <li class="mb-2"><a href="#" id="nav-reports" class="sidebar-item flex items-center p-3 rounded-lg"><span class="material-icons-outlined mr-4">analytics</span><span>Reports</span></a></li>
+                    <li class="mb-2"><a href="#" id="nav-contact-leads" class="sidebar-item flex items-center p-3 rounded-lg"><span class="material-icons-outlined mr-4">contacts</span><span>Contact Leads</span></a></li>
+                </ul>
+            </nav>
+            <div class="mt-auto pt-6 border-t border-gray-800">
+                <div class="text-gray-400 text-sm mb-2 truncate" id="user-email-display"></div>
+                <a href="#" onclick="logout()" class="flex items-center p-3 rounded-lg text-gray-400 hover:bg-gray-800 hover:text-gray-100">
+                    <span class="material-icons-outlined mr-4">logout</span>
+                    <span>Logout</span>
+                </a>
+            </div>
+        </aside>
+
+        <main id="main-content" class="flex-1 p-6 md:p-8 lg:p-10 overflow-y-auto"></main>
+
+        <div id="contact-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[100] hidden">
+             <div class="bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-700 w-11/12 max-w-lg">
+                <h3 class="text-2xl font-bold mb-4 text-gray-100" id="contact-modal-title"></h3>
+                <p class="text-gray-400 mb-4">You can reach <span id="contact-modal-biz-name" class="font-semibold text-teal-400"></span> via:</p>
+                <div class="flex flex-col gap-3 mb-6">
+                    <a id="modal-call-btn" href="#" class="bg-blue-600 text-white font-semibold py-3 px-6 rounded-md hover:bg-blue-700 flex items-center justify-center"><span class="material-icons-outlined mr-2">call</span> Call Now</a>
+                    <a id="modal-email-btn" href="#" class="bg-green-600 text-white font-semibold py-3 px-6 rounded-md hover:bg-green-700 flex items-center justify-center"><span class="material-icons-outlined mr-2">mail</span> Send Email</a>
+                    <a id="modal-website-btn" href="#" target="_blank" class="bg-purple-600 text-white font-semibold py-3 px-6 rounded-md hover:bg-purple-700 flex items-center justify-center"><span class="material-icons-outlined mr-2">link</span> Visit Website</a>
+                </div>
+                <button onclick="closeContactModal()" class="w-full bg-gray-600 text-white font-semibold py-2 rounded-md hover:bg-gray-700">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- IMPORTANT: This configuration now points to your new, visible project ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyDBd7vcAZyW6zvd86Ds9JFoUQCHyoRBrNw", // This key is for Firebase SDK auth, it's safe to be public
+            authDomain: "leadradar-462216.firebaseapp.com",
+            projectId: "leadradar-462216",
+            storageBucket: "leadradar-462216.appspot.com",
+            messagingSenderId: "1234567890", // Replace with your actual messaging sender ID
+            appId: "1:1234567890:web:abcdef123456" // Replace with your actual app ID
+        };
+        
+        // --- Initialize Firebase ---
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        // --- Global App State ---
+        let googleMapsLoaded = false;
+        let currentUser = null; 
+        let statusChartInstance = null;
+        let reportsMapInstance = null;
+
+        // --- Auth Elements ---
+        const authSection = document.getElementById('auth-section');
+        const appSection = document.getElementById('app-section');
+        const userEmailDisplay = document.getElementById('user-email-display');
+        const authError = document.getElementById('auth-error');
+
+        // --- Auth State Observer ---
+        auth.onAuthStateChanged(user => {
+            if (user) {
+                currentUser = user;
+                document.body.classList.add('authenticated');
+                userEmailDisplay.textContent = user.email;
+                loadPage('search-leads');
+            } else {
+                currentUser = null;
+                document.body.classList.remove('authenticated');
+            }
+        });
+        
+        // --- Auth Functions ---
+        function login() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            authError.textContent = '';
+            auth.signInWithEmailAndPassword(email, password)
+                .catch(error => { authError.textContent = error.message; });
+        }
+        function signup() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            authError.textContent = '';
+            auth.createUserWithEmailAndPassword(email, password)
+                .catch(error => { authError.textContent = error.message; });
+        }
+        function logout() { auth.signOut(); }
+
+        // --- FIRESTORE DATA FUNCTIONS ---
+        async function getLeadsFromFirestore() {
+            if (!currentUser) return [];
+            const snapshot = await db.collection('users').doc(currentUser.uid).collection('leads').get();
+            return snapshot.docs.map(doc => ({ ...doc.data(), place_id: doc.id }));
+        }
+
+        async function saveLead(bizString) {
+            if (!currentUser) return alert("You must be logged in to save leads.");
+            const biz = JSON.parse(decodeURIComponent(bizString));
+            const leadRef = db.collection('users').doc(currentUser.uid).collection('leads').doc(biz.place_id);
+            const doc = await leadRef.get();
+            if (doc.exists) {
+                alert(`${biz.name} is already in your leads.`);
+            } else {
+                await leadRef.set({
+                    ...biz,
+                    status: 'New',
+                    category: 'Uncategorized',
+                    notes: '',
+                    savedAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                alert(`${biz.name} saved successfully!`);
+            }
+        }
+        
+        async function saveLeadChanges(placeId) {
+            if (!currentUser) return;
+            const card = document.querySelector(`.lead-card[data-place-id='${placeId}']`);
+            if (!card) return;
+            const newStatus = card.querySelector('.lead-status-select').value;
+            const newNotes = card.querySelector('.lead-notes-textarea').value;
+            const leadRef = db.collection('users').doc(currentUser.uid).collection('leads').doc(placeId);
+            await leadRef.update({ status: newStatus, notes: newNotes });
+            alert("Lead changes saved successfully!");
+        }
+
+        async function deleteLead(placeId) {
+            if (!currentUser) return;
+            if (confirm("Are you sure you want to delete this lead?")) {
+                await db.collection('users').doc(currentUser.uid).collection('leads').doc(placeId).delete();
+                alert("Lead deleted successfully.");
+                const currentPage = document.querySelector('.sidebar-item.active')?.id.replace('nav-', '');
+                if (currentPage) loadPage(currentPage);
+            }
+        }
+
+        // --- Page Content Templates ---
+        const pages = {
+            'search-leads': `
+                <header class="flex items-center justify-between md:hidden mb-6"><h1 class="text-2xl font-bold">LeadRadar</h1><button onclick="toggleSidebar()" class="p-2"><span class="material-icons-outlined text-3xl">menu</span></button></header>
+                <header class="mb-8 hidden md:block"><h1 class="text-4xl font-bold mb-2">Search GMB Leads</h1><p class="text-gray-400 text-lg">Find active local business leads from Google Maps.</p></header>
+                <div class="bg-gray-800 p-6 rounded-lg shadow-xl mb-8 border border-gray-700">
+                    <h2 class="text-xl font-semibold mb-4">Enter a niche and location to begin...</h2>
+                    <div class="flex flex-col md:flex-row gap-4">
+                        <input id="businessInput" type="text" placeholder="e.g., coffee shop" class="flex-1 p-3 border border-gray-700 rounded-md bg-gray-900 focus:outline-none focus:ring-2 focus:ring-teal-500 text-lg" />
+                        <input id="locationInput" type="text" placeholder="e.g., Dallas, TX" class="flex-1 p-3 border border-gray-700 rounded-md bg-gray-900 focus:outline-none focus:ring-2 focus:ring-teal-500 text-lg" />
+                        <button onclick="searchBusiness()" class="bg-teal-600 text-white font-semibold py-3 px-6 rounded-md hover:bg-teal-700 flex items-center justify-center text-lg"><span class="material-icons-outlined mr-2">search</span>Search</button>
+                    </div>
+                    <div id="loadingIndicator" class="hidden text-center mt-4"><div class="animate-spin inline-block w-6 h-6 border-4 border-teal-500 border-t-transparent rounded-full"></div><p class="mt-2">Searching...</p></div>
+                </div>
+                <div id="results" class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"></div>`,
+            'manage-leads': `
+                <header class="mb-8"><h1 class="text-3xl font-bold mb-4">Manage Saved Leads</h1></header>
+                <div class="bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-700">
+                    <div class="mb-4">
+                        <label for="lead-status-filter" class="block text-sm font-medium mb-1">Filter by Status:</label>
+                        <select id="lead-status-filter" onchange="loadLeads()" class="w-full md:w-auto p-2 border border-gray-700 rounded-md bg-gray-900 focus:ring-2 focus:ring-teal-500">
+                            <option value="">All Statuses</option><option value="New">New</option><option value="Contacted">Contacted</option><option value="Follow-up">Follow-up</option><option value="Closed">Closed</option><option value="Lost">Lost</option>
+                        </select>
+                    </div>
+                    <div id="leads-container" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"></div>
+                </div>`,
+            'reports': `
+                 <header class="mb-8"><h1 class="text-3xl font-bold mb-6">Lead Reports</h1></header>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div class="bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-700"><h2 class="text-xl font-semibold mb-4">Status Breakdown</h2><canvas id="statusChart"></canvas><p id="no-status-data" class="text-center hidden mt-4">No data to display.</p></div>
+                    <div class="bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-700"><h2 class="text-xl font-semibold mb-4">Geographic Distribution</h2><div id="reports-map-container" class="w-full rounded"></div><p id="no-map-data" class="text-center hidden mt-4">No location data to display.</p></div>
+                </div>`,
+            'contact-leads': `
+                 <header class="mb-8"><h1 class="text-3xl font-bold">Contact Leads</h1></header>
+                <div class="bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-700">
+                    <h2 class="text-xl font-semibold mb-4">Your Contactable Leads</h2>
+                    <div id="contact-leads-list" class="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3"></div>
+                    <p id="no-contact-leads-data" class="text-center hidden mt-4">No leads available for contact.</p>
+                </div>`
+        };
+
+        // --- Core App Logic ---
+        function loadPage(pageName) {
+            document.getElementById('main-content').innerHTML = pages[pageName];
+            document.querySelectorAll('.sidebar-item').forEach(item => item.classList.remove('active'));
+            document.getElementById(`nav-${pageName}`)?.classList.add('active');
+            
+            if (pageName === 'manage-leads') loadLeads();
+            else if (pageName === 'reports') renderChartsAndMap();
+            else if (pageName === 'contact-leads') loadContactLeadsPage();
+
+            if (window.innerWidth < 768) toggleSidebar();
+        }
+
+        async function searchBusiness() {
+            const query = document.getElementById('businessInput').value.trim();
+            const location = document.getElementById('locationInput').value.trim();
+            const resultsDiv = document.getElementById('results');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            if (!query || !location) return alert('Please enter both a business keyword and a location.');
+
+            resultsDiv.innerHTML = '';
+            loadingIndicator.classList.remove('hidden');
+            
+            try {
+                const projectId = firebaseConfig.projectId;
+                const response = await fetch(`https://us-central1-${projectId}.cloudfunctions.net/placesTextSearch?query=${encodeURIComponent(query + ' in ' + location)}`);
+                const data = await response.json();
+                
+                if (data.status === 'OK') {
+                    displayResults(data.results);
+                } else {
+                    resultsDiv.innerHTML = `<p class="col-span-full text-center text-red-400">${data.error_message || 'No businesses found.'}</p>`;
+                }
+            } catch (error) {
+                console.error('Search error:', error);
+                resultsDiv.innerHTML = `<p class="col-span-full text-center text-red-400">A network error occurred.</p>`;
+            } finally {
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+
+        function displayResults(businesses) {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '';
+            businesses.forEach((biz, index) => {
+                const card = document.createElement('div');
+                card.className = 'bg-gray-800 rounded-lg shadow-xl p-5 flex flex-col justify-between border border-gray-700';
+                const website = biz.website || (biz.url?.startsWith('http') ? biz.url : '');
+                const bizString = encodeURIComponent(JSON.stringify(biz));
+                card.innerHTML = `
+                    <div>
+                        <h3 class="text-xl font-semibold mb-2">${biz.name}</h3>
+                        <p class="text-sm text-gray-400 mb-2">${biz.formatted_address}</p>
+                        ${biz.rating ? `<p class="text-md text-gray-300">Rating: <span class="font-bold text-teal-400">${biz.rating}</span> (${biz.user_ratings_total || 0})</p>` : ''}
+                        <div id="map-${index}" class="map-container"></div>
+                    </div>
+                    <div class="mt-4 space-y-2">
+                        <button onclick="saveLead('${bizString}')" class="w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700 flex items-center justify-center"><span class="material-icons-outlined mr-2 text-base">bookmark_add</span>Save Lead</button>
+                        <button onclick="runPageSpeed('${website}', '${biz.place_id}')" ${!website ? 'disabled' : ''} class="w-full bg-teal-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-teal-700 flex items-center justify-center ${!website ? 'opacity-50 cursor-not-allowed' : ''}"><span class="material-icons-outlined mr-2 text-base">speed</span>Run PageSpeed</button>
+                        <div id="pagespeed-result-${biz.place_id}" class="text-center mt-3 text-sm font-medium"></div>
+                    </div>`;
+                resultsDiv.appendChild(card);
+                if (biz.geometry?.location) setTimeout(() => initMap(biz.geometry.location.lat, biz.geometry.location.lng, `map-${index}`), 100);
+            });
+        }
+
+        async function runPageSpeed(url, placeId) {
+            const resultsDiv = document.getElementById(`pagespeed-result-${placeId}`);
+            if (!url || !resultsDiv) return;
+            resultsDiv.innerHTML = `<div class="flex items-center justify-center text-teal-400"><div class="animate-spin inline-block w-4 h-4 border-2 rounded-full mr-2"></div>Analyzing...</div>`;
+            try {
+                const projectId = firebaseConfig.projectId;
+                const response = await fetch(`https://us-central1-${projectId}.cloudfunctions.net/pageSpeedProxy?url=${encodeURIComponent(url)}`);
+                const data = await response.json();
+                const score = data.lighthouseResult?.categories?.performance?.score;
+
+                if (score !== undefined) {
+                    const scorePct = (score * 100).toFixed(0);
+                    const scoreClass = score >= 0.9 ? 'score-good' : score >= 0.5 ? 'score-medium' : 'score-bad';
+                    resultsDiv.innerHTML = `PageSpeed Score: <span class="font-bold ${scoreClass}">${scorePct}</span>`;
+                } else {
+                    resultsDiv.innerHTML = '<span class="text-red-400">Data not available.</span>';
+                }
+            } catch (error) {
+                console.error('PageSpeed error:', error);
+                resultsDiv.innerHTML = '<span class="text-red-400">Error running test.</span>';
+            }
+        }
+        
+        async function loadLeads() {
+            const filterStatus = document.getElementById('lead-status-filter').value;
+            let leads = await getLeadsFromFirestore();
+            if (filterStatus) {
+                leads = leads.filter(lead => lead.status === filterStatus);
+            }
+            const container = document.getElementById('leads-container');
+            container.innerHTML = '';
+            if (!leads.length) {
+                container.innerHTML = `<p class="col-span-full text-center text-gray-400">No leads found.</p>`;
+                return;
+            }
+            
+            const LEAD_STATUSES = ['New', 'Contacted', 'Follow-up', 'Closed', 'Lost'];
+            
+            leads.forEach(lead => {
+                const card = document.createElement('div');
+                card.className = "bg-gray-700 p-5 rounded-lg shadow-lg flex flex-col lead-card";
+                card.setAttribute('data-place-id', lead.place_id);
+                card.innerHTML = `
+                    <div class="flex-grow">
+                        <h2 class="text-xl font-bold mb-2">${lead.name}</h2>
+                        <p class="text-sm text-gray-400 mb-4">${lead.formatted_address}</p>
+                        <div class="mb-3">
+                            <label class="text-xs text-gray-400">Status:</label>
+                            <select class="w-full p-2 border-gray-600 rounded bg-gray-800 text-sm focus:ring-2 focus:ring-teal-500 lead-status-select">
+                                ${LEAD_STATUSES.map(s => `<option value="${s}" ${lead.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="text-xs text-gray-400">Notes:</label>
+                            <textarea class="w-full p-2 rounded bg-gray-800 text-sm h-24 lead-notes-textarea" placeholder="Add your notes here...">${lead.notes || ''}</textarea>
+                        </div>
+                    </div>
+                    <div class="mt-auto flex justify-between items-center pt-3 border-t border-gray-600">
+                        <button onclick="saveLeadChanges('${lead.place_id}')" class="bg-blue-600 text-white font-semibold px-4 py-2 rounded text-sm hover:bg-blue-700">Save</button>
+                        <button onclick="deleteLead('${lead.place_id}')" class="bg-red-600 text-white font-semibold px-4 py-2 rounded text-sm hover:bg-red-700">Delete</button>
+                    </div>`;
+                container.appendChild(card);
+            });
+        }
+
+        async function loadContactLeadsPage() {
+            const leads = await getLeadsFromFirestore();
+            const container = document.getElementById('contact-leads-list');
+            const noDataMsg = document.getElementById('no-contact-leads-data');
+            container.innerHTML = '';
+            if (!leads.length) {
+                noDataMsg.classList.remove('hidden');
+                return;
+            }
+            noDataMsg.classList.add('hidden');
+            leads.forEach(lead => {
+                const card = document.createElement('div');
+                card.className = "bg-gray-700 p-4 rounded-lg shadow-lg";
+                card.innerHTML = `
+                    <h3 class="text-lg font-bold mb-2">${lead.name}</h3>
+                    <p class="text-sm text-gray-400 mb-3">${lead.formatted_address}</p>
+                    <button onclick="openContactModal('${encodeURIComponent(JSON.stringify(lead))}')" class="mt-auto w-full bg-teal-600 font-semibold py-2 rounded hover:bg-teal-700">Contact Options</button>`;
+                container.appendChild(card);
+            });
+        }
+
+        // --- UI & Modal Functions ---
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+            document.getElementById('sidebar-overlay').classList.toggle('visible');
+        }
+
+        function openContactModal(leadString) {
+            const lead = JSON.parse(decodeURIComponent(leadString));
+            document.getElementById('contact-modal-title').textContent = `Contact ${lead.name}`;
+            document.getElementById('contact-modal-biz-name').textContent = lead.name;
+            const callBtn = document.getElementById('modal-call-btn');
+            const websiteBtn = document.getElementById('modal-website-btn');
+            callBtn.href = lead.international_phone_number ? `tel:${lead.international_phone_number}` : '#';
+            callBtn.classList.toggle('opacity-50', !lead.international_phone_number);
+            callBtn.classList.toggle('cursor-not-allowed', !lead.international_phone_number);
+            const website = lead.website || lead.url;
+            websiteBtn.href = website || '#';
+            websiteBtn.classList.toggle('opacity-50', !website);
+            websiteBtn.classList.toggle('cursor-not-allowed', !website);
+            document.getElementById('contact-modal').classList.remove('hidden');
+        }
+
+        function closeContactModal() {
+            document.getElementById('contact-modal').classList.add('hidden');
+        }
+
+        // --- Maps & Charts ---
+        function initMapPlaceholder() { googleMapsLoaded = true; }
+        const mapStyles = [{elementType:"geometry",stylers:[{color:"#242f3e"}]},{elementType:"labels.text.stroke",stylers:[{color:"#242f3e"}]},{elementType:"labels.text.fill",stylers:[{color:"#746855"}]},{featureType:"administrative.locality",elementType:"labels.text.fill",stylers:[{color:"#d59563"}]},{featureType:"poi",elementType:"labels.text.fill",stylers:[{color:"#d59563"}]},{featureType:"poi.park",elementType:"geometry",stylers:[{color:"#263c3f"}]},{featureType:"poi.park",elementType:"labels.text.fill",stylers:[{color:"#6b9a76"}]},{featureType:"road",elementType:"geometry",stylers:[{color:"#38414e"}]},{featureType:"road",elementType:"geometry.stroke",stylers:[{color:"#212a37"}]},{featureType:"road",elementType:"labels.text.fill",stylers:[{color:"#9ca5b3"}]},{featureType:"road.highway",elementType:"geometry",stylers:[{color:"#746855"}]},{featureType:"road.highway",elementType:"geometry.stroke",stylers:[{color:"#1f2835"}]},{featureType:"road.highway",elementType:"labels.text.fill",stylers:[{color:"#f3d19c"}]},{featureType:"transit",elementType:"geometry",stylers:[{color:"#2f3948"}]},{featureType:"transit.station",elementType:"labels.text.fill",stylers:[{color:"#d59563"}]},{featureType:"water",elementType:"geometry",stylers:[{color:"#17263c"}]},{featureType:"water",elementType:"labels.text.fill",stylers:[{color:"#515c6d"}]},{featureType:"water",elementType:"labels.text.stroke",stylers:[{color:"#17263c"}]}];
+        
+        function initMap(lat, lng, mapId) {
+            if (!googleMapsLoaded || !document.getElementById(mapId)) return;
+            const map = new google.maps.Map(document.getElementById(mapId), { center: { lat, lng }, zoom: 15, disableDefaultUI: true, styles: mapStyles });
+            new google.maps.Marker({ position: { lat, lng }, map });
+        }
+
+        async function renderChartsAndMap() {
+            if (!googleMapsLoaded) return;
+            const leads = await getLeadsFromFirestore();
+            // Chart
+            const statusCounts = leads.reduce((acc, lead) => { acc[lead.status] = (acc[lead.status] || 0) + 1; return acc; }, {});
+            const statusChartCanvas = document.getElementById('statusChart');
+            const noStatusData = document.getElementById('no-status-data');
+            if (statusChartInstance) statusChartInstance.destroy();
+            if (Object.keys(statusCounts).length === 0) {
+                if(statusChartCanvas) statusChartCanvas.style.display = 'none';
+                if(noStatusData) noStatusData.classList.remove('hidden');
+            } else {
+                if(statusChartCanvas) statusChartCanvas.style.display = 'block';
+                if(noStatusData) noStatusData.classList.add('hidden');
+                statusChartInstance = new Chart(statusChartCanvas.getContext('2d'), { type: 'pie', data: { labels: Object.keys(statusCounts), datasets: [{ data: Object.values(statusCounts), backgroundColor: ['#34d399', '#facc15', '#3b82f6', '#ef4444', '#a78bfa'] }] }, options: { responsive: true, plugins: { legend: { labels: { color: '#fff' } } } } });
+            }
+            // Map
+            const mapElement = document.getElementById("reports-map-container");
+            const noMapDataMsg = document.getElementById('no-map-data');
+            const leadsWithLocation = leads.filter(l => l.geometry?.location);
+            if (leadsWithLocation.length === 0) {
+                if(mapElement) mapElement.innerHTML = '';
+                if(noMapDataMsg) noMapDataMsg.classList.remove('hidden');
+                return;
+            }
+            if(noMapDataMsg) noMapDataMsg.classList.add('hidden');
+            let bounds = new google.maps.LatLngBounds();
+            leadsWithLocation.forEach(l => bounds.extend(new google.maps.LatLng(l.geometry.location.lat, l.geometry.location.lng)));
+            const reportsMap = new google.maps.Map(mapElement, { disableDefaultUI: true, styles: mapStyles });
+            reportsMap.fitBounds(bounds);
+            leadsWithLocation.forEach(l => new google.maps.Marker({ position: l.geometry.location, map: reportsMap, title: l.name }));
+        }
+
+        // --- Event Listeners ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const navLinks = {
+                'nav-search-leads': 'search-leads', 'nav-manage-leads': 'manage-leads',
+                'nav-reports': 'reports', 'nav-contact-leads': 'contact-leads'
+            };
+            for (const [id, page] of Object.entries(navLinks)) {
+                document.getElementById(id)?.addEventListener('click', (e) => { e.preventDefault(); loadPage(page); });
+            }
+        });
+
+    </script>
+</body>
+</html>
